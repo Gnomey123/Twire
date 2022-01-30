@@ -45,7 +45,7 @@
     <string name="menu_sleep">Sleep timer</string>
     <string name="menu_share">Share</string>
     <string name="menu_options">Options</string>
-    <string name="menu_speed">Playback Speed</string>
+    <string name="menu_playback">Playback Settings</string>
     <string name="options">Options</string>
     <string name="audio_only">Audio only</string>
     <string name="chat_only">Chat only</string>
@@ -81,6 +81,7 @@
 
     <string name="playback_speed_display">×%.2f</string>
     <string name="playback_speed">%.2f</string>
+    <string name="skip_silence">Skip Silence</string>
 
     <!-- VOD activity -->
     <string name="vod_playback_failed">Failed to play VOD. Try another quality.</string>
@@ -302,6 +303,16 @@
 
     <!-- The first letter of each line of the changelog denotes if it's about a new Version, Addition, Fix or Change and should not be translated. -->
     <string-array name="changelog_lines">
+        <item>V 2.10.1</item>
+        <item>A Add 7TV emotes</item>
+        <item>A Add skip silence feature</item>
+        <item>F Fix recent emotes crash and support emote themes</item>
+        <item>A Add source quality for VODs</item>
+        <item>F Fix room state icons not showing correctly</item>
+        <item>F Fix crash when chat room state changes</item>
+        <item>F Fix preview image scaling</item>
+        <item>C Update Hungarian, French, Portuguese (Brazil), Turkish, Basque, Esperanto, Italian, Polish, German, Russian and Chinese (Simplified) translations</item>
+
         <item>V 2.10.0</item>
         <item>A Add playback speed control.</item>
         <item>A Add SSL connection to chat.</item>

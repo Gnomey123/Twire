@@ -66,7 +66,6 @@ import com.bumptech.glide.signature.ObjectKey;
 import com.github.stephenvinouze.materialnumberpickercore.MaterialNumberPicker;
 import com.google.android.exoplayer2.MediaItem;
 import com.google.android.exoplayer2.PlaybackException;
-import com.google.android.exoplayer2.PlaybackParameters;
 import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector;
@@ -329,8 +328,6 @@ public class StreamFragment extends Fragment implements Player.Listener {
         mRuntime = mRootView.findViewById(R.id.txtViewRuntime);
         mActivity = (AppCompatActivity) getActivity();
         mClickInterceptor = mRootView.findViewById(R.id.click_interceptor);
-        View mCurrentViewersWrapper = mRootView.findViewById(R.id.viewers_wrapper);
-        View mRuntimeWrapper = mRootView.findViewById(R.id.runtime_wrapper);
 
         setupToolbar();
         setupSpinner();
@@ -411,7 +408,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
             mTimeController.setVisibility(View.INVISIBLE);
 
             if (!settings.getStreamPlayerRuntime()) {
-                mRuntimeWrapper.setVisibility(View.GONE);
+                mRuntime.setVisibility(View.GONE);
             } else {
                 runtime = true;
                 Date date = null;
@@ -431,11 +428,11 @@ public class StreamFragment extends Fragment implements Player.Listener {
                 mCurrentViewersView.setText(String.valueOf(args.getInt(getString(R.string.stream_fragment_viewers))));
                 startFetchingViewers();
             } else {
-                mCurrentViewersWrapper.setVisibility(View.GONE);
+                mCurrentViewersView.setVisibility(View.GONE);
             }
         } else {
-            mCurrentViewersWrapper.setVisibility(View.GONE);
-            mRuntimeWrapper.setVisibility(View.GONE);
+            mCurrentViewersView.setVisibility(View.GONE);
+            mRuntime.setVisibility(View.GONE);
 
             mForward.setOnClickListener(v -> {
                 seeking = true;
@@ -563,7 +560,8 @@ public class StreamFragment extends Fragment implements Player.Listener {
             mVideoView.setPlayer(player);
 
             if (vodId != null) {
-                player.setPlaybackParameters(new PlaybackParameters(settings.getPlaybackSpeed()));
+                player.setPlaybackSpeed(settings.getPlaybackSpeed());
+                player.setSkipSilenceEnabled(settings.getSkipSilence());
             }
 
             if (currentMediaSource != null) {
@@ -901,11 +899,8 @@ public class StreamFragment extends Fragment implements Player.Listener {
         sleepTimer.show(getActivity());
     }
 
-    private void speedButtonClicked() {
-        DialogService.getSpeedDialog(getActivity(), player.getPlaybackParameters().speed, (speed) -> {
-            player.setPlaybackParameters(new PlaybackParameters(speed));
-            settings.setPlaybackSpeed(speed);
-        }).show();
+    private void playbackButtonClicked() {
+        DialogService.getPlaybackDialog(getActivity(), player).show();
     }
 
     private void showSeekDialog() {
@@ -942,7 +937,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
             return true;
         });
 
-        menu.findItem(R.id.menu_item_speed).setVisible(vodId != null);
+        menu.findItem(R.id.menu_item_playback).setVisible(vodId != null);
     }
 
     @Override
@@ -965,8 +960,8 @@ public class StreamFragment extends Fragment implements Player.Listener {
         } else if (itemId == R.id.menu_item_external) {
             playWithExternalPlayer();
             return true;
-        } else if (itemId == R.id.menu_item_speed) {
-            speedButtonClicked();
+        } else if (itemId == R.id.menu_item_playback) {
+            playbackButtonClicked();
             return true;
         }
 
