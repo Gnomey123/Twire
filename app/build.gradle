@@ -6,7 +6,7 @@ android {
     ndkVersion "22.1.7171670"
 
     defaultConfig {
-        applicationId "com.perflyst.twire"
+        applicationId "com.genomey.twire"
         minSdkVersion 16
         targetSdkVersion 31
         versionCode 524
@@ -16,8 +16,20 @@ android {
         vectorDrawables.useSupportLibrary true
     }
 
+    signingConfigs {
+        release {
+            // You need to specify either an absolute path or include the
+            // keystore file in the same directory as the build.gradle file.
+            storeFile file("my-release-key-alieas-is-Genomey.jks")
+            storePassword "N0amb0y123"
+            keyAlias "Genomey"
+            keyPassword "N0amb0y123"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled true
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             resValue "string", "app_name", "Twire"
