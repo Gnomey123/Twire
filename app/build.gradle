@@ -9,11 +9,13 @@ android {
         applicationId "com.genomey.twire"
         minSdkVersion 16
         targetSdkVersion 31
-        versionCode 525
-        versionName "2.10.1"
+        versionCode 526
+        versionName "2.10.2"
 
         multiDexEnabled true
         vectorDrawables.useSupportLibrary true
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -41,7 +43,7 @@ android {
         }
     }
 
-    lintOptions {
+    lint {
         checkReleaseBuilds false
         abortOnError false
     }
@@ -100,7 +102,7 @@ dependencies {
     implementation "com.github.afollestad.material-dialogs:commons:0.8.6.2@aar"
 
     //https://github.com/google/ExoPlayer/blob/release-v2/RELEASENOTES.md
-    def exoPlayer = "2.15.1"
+    def exoPlayer = "2.17.1"
     implementation "com.google.android.exoplayer:exoplayer-core:$exoPlayer"
     implementation "com.google.android.exoplayer:exoplayer-hls:$exoPlayer"
     implementation "com.google.android.exoplayer:exoplayer-ui:$exoPlayer"
@@ -114,4 +116,13 @@ dependencies {
 
     //https://github.com/google/guava/releases
     api 'com.google.guava:guava:31.0.1-android'
+
+    //https://github.com/techyourchance/thread-poster/releases
+    implementation 'com.techyourchance:threadposter:1.0.1'
+
+    //Testing
+    testImplementation "junit:junit:4.13.2"
+    def androidXTestVersion = "1.4.0"
+    androidTestImplementation "androidx.test:runner:$androidXTestVersion"
+    androidTestImplementation "androidx.test:rules:$androidXTestVersion"
 }

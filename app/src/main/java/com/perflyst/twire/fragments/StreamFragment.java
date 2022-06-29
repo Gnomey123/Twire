@@ -2,6 +2,7 @@ package com.perflyst.twire.fragments;
 
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.app.PictureInPictureParams;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -22,6 +23,7 @@ import android.support.v4.media.session.MediaSessionCompat;
 import android.transition.Transition;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.Rational;
 import android.view.Display;
 import android.view.DisplayCutout;
 import android.view.LayoutInflater;
@@ -64,31 +66,35 @@ import com.balysv.materialripple.MaterialRippleLayout;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.signature.ObjectKey;
 import com.github.stephenvinouze.materialnumberpickercore.MaterialNumberPicker;
+import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.MediaItem;
 import com.google.android.exoplayer2.PlaybackException;
 import com.google.android.exoplayer2.Player;
-import com.google.android.exoplayer2.SimpleExoPlayer;
+import com.google.android.exoplayer2.SeekParameters;
 import com.google.android.exoplayer2.ext.mediasession.MediaSessionConnector;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.hls.HlsMediaSource;
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
-import com.google.android.exoplayer2.ui.PlayerView;
+import com.google.android.exoplayer2.ui.StyledPlayerView;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource;
 import com.google.android.exoplayer2.util.Util;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.snackbar.Snackbar;
 import com.perflyst.twire.R;
+import com.perflyst.twire.TwireApplication;
 import com.perflyst.twire.activities.ChannelActivity;
 import com.perflyst.twire.activities.stream.StreamActivity;
 import com.perflyst.twire.adapters.PanelAdapter;
 import com.perflyst.twire.chat.ChatManager;
+import com.perflyst.twire.lowlatency.LLHlsPlaylistParserFactory;
 import com.perflyst.twire.misc.FollowHandler;
 import com.perflyst.twire.misc.ResizeHeightAnimation;
 import com.perflyst.twire.misc.ResizeWidthAnimation;
 import com.perflyst.twire.model.ChannelInfo;
 import com.perflyst.twire.model.Quality;
 import com.perflyst.twire.model.SleepTimer;
+import com.perflyst.twire.model.UserInfo;
 import com.perflyst.twire.service.DialogService;
 import com.perflyst.twire.service.Service;
 import com.perflyst.twire.service.Settings;
@@ -131,8 +137,9 @@ public class StreamFragment extends Fragment implements Player.Listener {
             autoPlay = true,
             hasPaused = false,
             seeking = false,
-            runtime = false;
-    private ChannelInfo mChannelInfo;
+            runtime = false,
+            landscapeChatVisible = false;
+    private UserInfo mUserInfo;
     private String vodId;
     private HeadsetPlugIntentReceiver headsetIntentReceiver;
     private Settings settings;
@@ -140,8 +147,8 @@ public class StreamFragment extends Fragment implements Player.Listener {
     private LinkedHashMap<String, Quality> qualityURLs;
     private boolean isLandscape = false, previewInbackGround = false;
     private Runnable fetchViewCountRunnable;
-    private PlayerView mVideoView;
-    private SimpleExoPlayer player;
+    private StyledPlayerView mVideoView;
+    private ExoPlayer player;
     private MediaSource currentMediaSource;
     private Toolbar mToolbar;
     private ConstraintLayout mVideoInterface;
@@ -278,12 +285,10 @@ public class StreamFragment extends Fragment implements Player.Listener {
         settings = new Settings(getActivity());
 
         if (args != null) {
-            mChannelInfo = args.getParcelable(getString(R.string.stream_fragment_streamerInfo));
+            mUserInfo = args.getParcelable(getString(R.string.stream_fragment_streamerInfo));
             vodId = args.getString(getString(R.string.stream_fragment_vod_id));
             vodLength = args.getInt(getString(R.string.stream_fragment_vod_length));
             autoPlay = args.getBoolean(getString(R.string.stream_fragment_autoplay));
-
-            settings.setVodLength(vodId, vodLength);
         }
 
         final View mRootView = inflater.inflate(R.layout.fragment_stream, container, false);
@@ -300,7 +305,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
         }
 
         //  If no streamer info is available we cant show the stream.
-        if (mChannelInfo == null) {
+        if (mUserInfo == null) {
             if (getActivity() != null) {
                 getActivity().finish();
             }
@@ -346,9 +351,9 @@ public class StreamFragment extends Fragment implements Player.Listener {
 
             try {
                 if (player.isPlaying()) {
-                    pauseStream();
+                    player.pause();
                 } else if (!player.isPlaying()) {
-                    resumeStream();
+                    player.play();
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -451,8 +456,6 @@ public class StreamFragment extends Fragment implements Player.Listener {
 
             mCurrentProgressView.setOnClickListener(v -> showSeekDialog());
 
-            ChatManager.updateVodProgress(ChatManager.VOD_LOADING, true);
-
             TextView maxProgress = mRootView.findViewById(R.id.maxProgress);
             maxProgress.setText(Service.calculateTwitchVideoLength(vodLength));
 
@@ -460,7 +463,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                 @Override
                 public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                     if (progress == vodLength) {
-                        pauseStream();
+                        player.pause();
                     }
 
                     if (vodId != null && !seeking && !fromUser) {
@@ -555,13 +558,14 @@ public class StreamFragment extends Fragment implements Player.Listener {
 
     private void initializePlayer() {
         if (player == null) {
-            player = new SimpleExoPlayer.Builder(getContext()).build();
+            player = new ExoPlayer.Builder(getContext()).build();
             player.addListener(this);
             mVideoView.setPlayer(player);
 
             if (vodId != null) {
                 player.setPlaybackSpeed(settings.getPlaybackSpeed());
                 player.setSkipSilenceEnabled(settings.getSkipSilence());
+                player.setSeekParameters(SeekParameters.CLOSEST_SYNC);
             }
 
             if (currentMediaSource != null) {
@@ -604,6 +608,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
         }
     }
 
+    /* Player.Listener implementation */
     @Override
     public void onPlaybackStateChanged(@Player.State int playbackState) {
         if (playbackState == Player.STATE_READY) {
@@ -626,9 +631,48 @@ public class StreamFragment extends Fragment implements Player.Listener {
 
     @Override
     public void onPlayerError(@NonNull PlaybackException exception) {
-        Log.e(LOG_TAG, "Something went wrong playing the stream for " + mChannelInfo.getDisplayName() + " - Exception: " + exception);
+        Log.e(LOG_TAG, "Something went wrong playing the stream for " + mUserInfo.getDisplayName() + " - Exception: " + exception);
 
         playbackFailed();
+    }
+
+    @Override
+    public void onPlayWhenReadyChanged(boolean isPlaying, int _ignored) {
+        if (isPlaying) {
+            showPauseIcon();
+            keepScreenOn();
+
+            if (!isAudioOnlyModeEnabled() && vodId == null) {
+                player.seekToDefaultPosition(); // Go forward to live
+            }
+        } else {
+            showPlayIcon();
+            releaseScreenOn();
+
+            delayAnimationHandler.removeCallbacks(hideAnimationRunnable);
+        }
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.O)
+    @Override
+    public void onSurfaceSizeChanged(int width, int height) {
+        Rect videoRect = new Rect();
+        mVideoView.getVideoSurfaceView().getGlobalVisibleRect(videoRect);
+
+        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            videoRect.left += totalVerticalInset;
+            videoRect.right += totalVerticalInset;
+        }
+
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
+                .setAspectRatio(new Rational(16, 9))
+                .setSourceRectHint(videoRect);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(true);
+        }
+
+        mActivity.setPictureInPictureParams(builder.build());
     }
 
     /**
@@ -719,7 +763,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
             releasePlayer();
         }
 
-        ChatManager.setPreviousProgress();
+        ChatManager.instance.setPreviousProgress();
     }
 
     @Override
@@ -730,12 +774,11 @@ public class StreamFragment extends Fragment implements Player.Listener {
         mBufferingView.stop();
 
         if (!castingViewVisible && !audioViewVisible) {
-            pauseStream();
+            player.pause();
         }
 
         if (vodId != null) {
             settings.setVodProgress(vodId, currentProgress / 1000);
-            settings.setVodLength(vodId, vodLength);
             Log.d(LOG_TAG, "Saving Current progress: " + currentProgress);
         }
 
@@ -777,7 +820,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                             public void onChattersFetchFailed() {
 
                             }
-                        }, mChannelInfo.getStreamerName()
+                        }, mUserInfo.getLogin()
                 );
 
                 task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
@@ -807,7 +850,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                             } catch (Exception e) {
                                 e.printStackTrace();
                             }
-                        }, mChannelInfo.getUserId()
+                        }, mUserInfo.getUserId(), getContext()
                 );
 
                 task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
@@ -835,11 +878,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                 delayHiding();
             }
 
-            if (view.getRotation() == 0f) {
-                showLandscapeChat();
-            } else {
-                hideLandscapeChat();
-            }
+            setLandscapeChat(!landscapeChatVisible);
         });
     }
 
@@ -862,9 +901,9 @@ public class StreamFragment extends Fragment implements Player.Listener {
         String shareBody;
 
         if (vodId == null) {
-            shareBody = "https://twitch.tv/" + mChannelInfo.getStreamerName();
+            shareBody = "https://twitch.tv/" + mUserInfo.getLogin();
         } else {
-            shareBody = "https://www.twitch.tv/" + mChannelInfo.getStreamerName() + "/video/" + vodId.replaceAll("[a-zA-Z]+", "");
+            shareBody = "https://www.twitch.tv/" + mUserInfo.getLogin() + "/video/" + vodId;
         }
 
         sharingIntent.putExtra(android.content.Intent.EXTRA_TEXT, shareBody);
@@ -881,7 +920,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                 @Override
                 public void onTimesUp() {
                     stopAudioOnly();
-                    pauseStream();
+                    player.pause();
                 }
 
                 @Override
@@ -981,6 +1020,9 @@ public class StreamFragment extends Fragment implements Player.Listener {
                         final int X = (int) event.getRawX();
                         switch (event.getAction() & MotionEvent.ACTION_MASK) {
                             case MotionEvent.ACTION_DOWN:
+                                // If the user taps while the wrapper is in the resizing animation, cancel it.
+                                mVideoWrapper.clearAnimation();
+
                                 ConstraintLayout.LayoutParams lParams = (ConstraintLayout.LayoutParams) mVideoWrapper.getLayoutParams();
                                 if (lParams.width > 0)
                                     widthOnDown = lParams.width;
@@ -991,15 +1033,12 @@ public class StreamFragment extends Fragment implements Player.Listener {
                                 int upPosition = (int) event.getRawX();
                                 int deltaPosition = upPosition - downPosition;
 
-                                if (deltaPosition < 20 && deltaPosition > -20) {
+                                if (Math.abs(deltaPosition) < 20) {
+                                    setLandscapeChat(landscapeChatVisible);
                                     return false;
                                 }
 
-                                if (upPosition < downPosition) {
-                                    showLandscapeChat();
-                                } else {
-                                    hideLandscapeChat();
-                                }
+                                setLandscapeChat(upPosition < downPosition);
 
                                 break;
                             case MotionEvent.ACTION_MOVE:
@@ -1029,28 +1068,14 @@ public class StreamFragment extends Fragment implements Player.Listener {
         }
     }
 
-    /**
-     * Show the landscape chat with an animation that changes the width of the VideoView wrapper.
-     * The ShowChatButton is also rotated
-     */
-    private void showLandscapeChat() {
-        int width = getScreenRect(getActivity()).height();
-        ResizeWidthAnimation resizeWidthAnimation = new ResizeWidthAnimation(mVideoWrapper, width - getLandscapeChatTargetWidth());
-        resizeWidthAnimation.setDuration(250);
-        mVideoWrapper.startAnimation(resizeWidthAnimation);
-        mShowChatButton.animate().rotation(180f).start();
-    }
+    private void setLandscapeChat(boolean visible) {
+        landscapeChatVisible = visible;
 
-    /**
-     * hides the landscape chat with an animation that changes the width of the VideoView wrapper to the width of the screen.
-     * The ShowChatButton is also rotated
-     */
-    private void hideLandscapeChat() {
         int width = getScreenRect(getActivity()).height();
-        ResizeWidthAnimation resizeWidthAnimation = new ResizeWidthAnimation(mVideoWrapper, width);
+        ResizeWidthAnimation resizeWidthAnimation = new ResizeWidthAnimation(mVideoWrapper, visible ? width - getLandscapeChatTargetWidth() : width);
         resizeWidthAnimation.setDuration(250);
         mVideoWrapper.startAnimation(resizeWidthAnimation);
-        mShowChatButton.animate().rotation(0f).start();
+        mShowChatButton.animate().rotation(visible ? 180f : 0).start();
     }
 
     private int getLandscapeChatTargetWidth() {
@@ -1351,40 +1376,6 @@ public class StreamFragment extends Fragment implements Player.Listener {
     }
 
     /**
-     * Pauses and stops the playback of the Video Stream
-     */
-    private void pauseStream() {
-        Log.d(LOG_TAG, "Chat, pausing stream");
-        showPlayIcon();
-
-        delayAnimationHandler.removeCallbacks(hideAnimationRunnable);
-
-        if (player != null) {
-            player.pause();
-        }
-        releaseScreenOn();
-    }
-
-    /**
-     * Goes forward to live and starts playback of the VideoView
-     */
-    private void resumeStream() {
-        showPauseIcon();
-
-        if (!isAudioOnlyModeEnabled()) {
-            if (vodId == null) {
-                player.seekToDefaultPosition(); // Go forward to live
-            }
-
-            player.play();
-        } else {
-            player.play();
-        }
-
-        keepScreenOn();
-    }
-
-    /**
      * Tries playing stream with a quality.
      * If the given quality doesn't exist for the stream the try the next best quality option.
      * If no Quality URLS have yet been created then try to start stream with an aync task.
@@ -1402,7 +1393,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                 showQualities();
                 updateSelectedQuality(quality);
                 showPauseIcon();
-                Log.d(LOG_TAG, "Starting Stream With a quality on " + quality + " for " + mChannelInfo.getDisplayName());
+                Log.d(LOG_TAG, "Starting Stream With a quality on " + quality + " for " + mUserInfo.getDisplayName());
                 Log.d(LOG_TAG, "URLS: " + qualityURLs.keySet().toString());
             } else if (!qualityURLs.isEmpty()) {
                 Log.d(LOG_TAG, "Quality unavailable for this stream -  " + quality + ". Trying next best");
@@ -1438,10 +1429,17 @@ public class StreamFragment extends Fragment implements Player.Listener {
 
         if (vodId == null) {
             GetLiveStreamURL task = new GetLiveStreamURL(callback);
+<<<<<<< HEAD
             task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, mChannelInfo.getStreamerName(), types[settings.getStreamPlayerType()], settings.getStreamPlayerUseProxyString(), settings.getStreamPlayerProxyUrl());
         } else {
             GetLiveStreamURL task = new GetVODStreamURL(callback);
             task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, vodId.substring(1), types[settings.getStreamPlayerType()], settings.getStreamPlayerUseProxyString(), settings.getStreamPlayerProxyUrl());
+=======
+            task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, mUserInfo.getLogin(), types[settings.getStreamPlayerType()]);
+        } else {
+            GetLiveStreamURL task = new GetVODStreamURL(callback);
+            task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, vodId, types[settings.getStreamPlayerType()]);
+>>>>>>> 6bdd290468186334526973d0d1888d30a18abbb0
         }
     }
 
@@ -1463,7 +1461,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
 
         if (vodId == null) {
             GetLiveStreamURL task = new GetLiveStreamURL(delegate);
-            task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, mChannelInfo.getStreamerName());
+            task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, mUserInfo.getLogin());
         } else {
             GetLiveStreamURL task = new GetVODStreamURL(delegate);
             task.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, vodId.substring(1));
@@ -1530,15 +1528,25 @@ public class StreamFragment extends Fragment implements Player.Listener {
                     }
                 }});
 
+        MediaItem mediaItem = new MediaItem.Builder()
+                .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(1000).build())
+                .setUri(url)
+                .build();
+
         MediaSource mediaSource = new HlsMediaSource.Factory(dataSourceFactory)
+<<<<<<< HEAD
                 .createMediaSource(MediaItem.fromUri(Uri.parse(url)));
         Log.d("Playing", url);
+=======
+                .setPlaylistParserFactory(new LLHlsPlaylistParserFactory())
+                .createMediaSource(mediaItem);
+>>>>>>> 6bdd290468186334526973d0d1888d30a18abbb0
         currentMediaSource = mediaSource;
         player.setMediaSource(mediaSource);
         player.prepare();
 
         checkVodProgress();
-        resumeStream();
+        player.play();
     }
 
     private void playWithExternalPlayer() {
@@ -1662,27 +1670,34 @@ public class StreamFragment extends Fragment implements Player.Listener {
         if (mNameView == null || mFollowers == null || mViewers == null || mFullProfileButton == null || mPanelsRecyclerView == null)
             return;
 
-        mNameView.setText(mChannelInfo.getDisplayName());
-        mFollowers.setText(String.valueOf(mChannelInfo.getFollowers()));
-        mViewers.setText(String.valueOf(mChannelInfo.getViews()));
+        mNameView.setText(mUserInfo.getDisplayName());
+
+        TwireApplication.backgroundPoster.post(() -> {
+            ChannelInfo channelInfo = Service.getStreamerInfoFromUserId(mUserInfo.getUserId(), getContext());
+            TwireApplication.uiThreadPoster.post(() -> {
+                channelInfo.getFollowers(getContext(), followers -> mFollowers.setText(String.valueOf(followers.or(0))));
+                mViewers.setText(String.valueOf(channelInfo.getViews()));
+
+                setupFollowButton(mFollowButton, channelInfo);
+            });
+        });
 
         mFullProfileButton.setOnClickListener(view -> {
             mProfileBottomSheet.dismiss();
 
             final Intent intent = new Intent(getContext(), ChannelActivity.class);
-            intent.putExtra(getContext().getResources().getString(R.string.channel_info_intent_object), mChannelInfo);
+            intent.putExtra(getContext().getResources().getString(R.string.channel_info_intent_object), mUserInfo);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
             getContext().startActivity(intent);
         });
 
-        setupFollowButton(mFollowButton);
         setupPanels(mPanelsRecyclerView);
     }
 
-    private void setupFollowButton(final ImageView imageView) {
+    private void setupFollowButton(final ImageView imageView, ChannelInfo channelInfo) {
         final FollowHandler mFollowHandler = new FollowHandler(
-                mChannelInfo,
+                channelInfo,
                 getContext(),
                 () -> imageView.setVisibility(View.GONE)
         );
@@ -1722,7 +1737,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext(), RecyclerView.VERTICAL, false));
         recyclerView.setAdapter(mPanelAdapter);
 
-        GetPanelsTask mTask = new GetPanelsTask(mChannelInfo.getStreamerName(), mPanelAdapter::addPanels);
+        GetPanelsTask mTask = new GetPanelsTask(mUserInfo.getLogin(), mPanelAdapter::addPanels);
         mTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
@@ -1823,7 +1838,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
         startStreamWithQuality(settings.getPrefStreamQuality());
 
         // resume the stream
-        resumeStream();
+        player.play();
     }
 
     private void stopAudioOnlyNoServiceCall() {
@@ -1920,7 +1935,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
         setHasOptionsMenu(true);
         mActivity.setSupportActionBar(mToolbar);
         ActionBar actionBar = mActivity.getSupportActionBar();
-        if (actionBar != null) actionBar.setTitle(mChannelInfo.getDisplayName());
+        if (actionBar != null) actionBar.setTitle(mUserInfo.getDisplayName());
         mActivity.getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         //mActivity.getSupportActionBar().setDefaultDisplayHomeAsUpEnabled(true);
         mToolbar.bringToFront();
@@ -1991,7 +2006,7 @@ public class StreamFragment extends Fragment implements Player.Listener {
                         if (player.isPlaying()) {
                             Log.d(LOG_TAG, "Chat, pausing from headsetPlug");
                             showVideoInterface();
-                            pauseStream();
+                            player.pause();
                         }
                         break;
                     case 1:

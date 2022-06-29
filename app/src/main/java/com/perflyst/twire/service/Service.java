@@ -47,6 +47,7 @@ import com.perflyst.twire.activities.main.TopGamesActivity;
 import com.perflyst.twire.activities.main.TopStreamsActivity;
 import com.perflyst.twire.misc.SecretKeys;
 import com.perflyst.twire.model.ChannelInfo;
+import com.perflyst.twire.model.UserInfo;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -497,7 +498,7 @@ public class Service {
         return result == null ? "" : result;
     }
 
-    private static String urlToJSONString(String urlToRead, Boolean useOurClientId) {
+    public static String urlToJSONString(String urlToRead, Boolean useOurClientId) {
         String clientId;
         if (useOurClientId) {
             clientId = Service.getApplicationClientID();
@@ -554,36 +555,29 @@ public class Service {
         return (HttpURLConnection) url.openConnection();
     }
 
-    public static ChannelInfo getStreamerInfoFromUserId(int streamerId) throws NullPointerException {
+    public static ChannelInfo getStreamerInfoFromUserId(int streamerId, Context context) throws NullPointerException {
 
         ChannelInfo channelInfo = null;
         try {
-            JSONObject JSONString = new JSONObject(urlToJSONString("https://api.twitch.tv/kraken/channels/" + streamerId));
+            JSONObject info = new JSONObject(urlToJSONStringHelix("https://api.twitch.tv/helix/users?id=" + streamerId, context)).getJSONArray("data").getJSONObject(0);
 
-            int userId = JSONString.getInt("_id");
-            String displayName = JSONString.getString("display_name");
-            String name = JSONString.getString("name");
-            int followers = JSONString.getInt("followers");
-            int views = JSONString.getInt("views");
             URL logoURL = null;
             URL videoBannerURL = null;
+            // I don´t think helix still has these: https://discuss.dev.twitch.tv/t/twitch-api-user-profile-banner/24463/4
             URL profileBannerURL = null;
 
-            // Make sure streamer has actually set the pictures
-            if (!JSONString.isNull("logo")) {
-                logoURL = new URL(JSONString.getString("logo"));
-            }
-            if (!JSONString.isNull("video_banner")) {
-                videoBannerURL = new URL(JSONString.getString("video_banner"));
-            }
-            if (!JSONString.isNull("profile_banner")) {
-                profileBannerURL = new URL(JSONString.getString("profile_banner"));
+            if (info.getString("profile_image_url").contains("https")) {
+                logoURL = new URL(info.getString("profile_image_url"));
             }
 
-            JSONObject JSONStringTwo = new JSONObject(urlToJSONString("https://api.twitch.tv/kraken/users/" + streamerId));
-            String description = JSONStringTwo.getString("bio");
+            if (info.getString("offline_image_url").contains("https")) {
+                videoBannerURL = new URL(info.getString("offline_image_url"));
+            }
 
-            channelInfo = new ChannelInfo(userId, name, displayName, description, followers, views, logoURL, videoBannerURL, profileBannerURL, false);
+            int views = info.getInt("view_count");
+            String description = info.getString("description");
+
+            channelInfo = new ChannelInfo(JSONService.getUserInfo(info), description, -1, views, logoURL, videoBannerURL, profileBannerURL, false);
 
         } catch (JSONException e) {
             Log.v("Service: ", e.getMessage());
@@ -647,10 +641,10 @@ public class Service {
                 }
 
                 // Create new StreamerInfo object from data fetched from database
-                ChannelInfo mChannelInfo = new ChannelInfo(streamerId, streamerName, displayName,
+                ChannelInfo mChannelInfo = new ChannelInfo(new UserInfo(streamerId, streamerName, displayName),
                         streamDescription, followers, views, logo, videoBanner, profileBanner, includeThumbnails);
                 mChannelInfo.setNotifyWhenLive(notifyWhenLive);
-                subscriptions.put(mChannelInfo.getStreamerName(), mChannelInfo);
+                subscriptions.put(mChannelInfo.getDisplayName(), mChannelInfo);
 
                 // Move to the next record in the database
                 cursor.moveToNext();
@@ -675,6 +669,20 @@ public class Service {
         Cursor cursor = db.rawQuery(query, null);
         if (cursor.getCount() > 0) {
             result = true;
+        }
+        cursor.close();
+        db.close();
+        return result;
+    }
+
+    public static boolean isUserTwitch(Integer streamerId, Context context) {
+        SubscriptionsDbHelper mDbHelper = new SubscriptionsDbHelper(context);
+        SQLiteDatabase db = mDbHelper.getReadableDatabase();
+        String query = "SELECT * FROM " + SubscriptionsDbHelper.TABLE_NAME + " WHERE " + SubscriptionsDbHelper.COLUMN_ID + "='" + streamerId + "';";
+        boolean result = false;
+        Cursor cursor = db.rawQuery(query, null);
+        if (cursor.moveToFirst()) {
+            result = cursor.getInt(cursor.getColumnIndex(SubscriptionsDbHelper.COLUMN_IS_TWITCH_FOLLOW)) > 0;
         }
         cursor.close();
         db.close();
@@ -709,7 +717,11 @@ public class Service {
         SubscriptionsDbHelper mDbHelper = new SubscriptionsDbHelper(context);
         SQLiteDatabase db = mDbHelper.getWritableDatabase(); // Get the data repository in write mode
 
-        boolean result = db.delete(SubscriptionsDbHelper.TABLE_NAME, SubscriptionsDbHelper.COLUMN_ID + " = '" + streamerId + "'", null) > 0;
+        boolean result = false;
+        if (!isUserTwitch(streamerId, context)) {
+            result = db.delete(SubscriptionsDbHelper.TABLE_NAME, SubscriptionsDbHelper.COLUMN_ID + " = '" + streamerId + "'", null) > 0;
+        }
+
         db.close();
 
         return result;
@@ -722,12 +734,12 @@ public class Service {
         // Create a new map of values where column names are the keys
         ContentValues values = new ContentValues();
         values.put(SubscriptionsDbHelper.COLUMN_ID, streamer.getUserId());
-        values.put(SubscriptionsDbHelper.COLUMN_STREAMER_NAME, streamer.getStreamerName());
+        values.put(SubscriptionsDbHelper.COLUMN_STREAMER_NAME, streamer.getLogin());
         values.put(SubscriptionsDbHelper.COLUMN_DISPLAY_NAME, streamer.getDisplayName());
         values.put(SubscriptionsDbHelper.COLUMN_DESCRIPTION, streamer.getStreamDescription());
-        values.put(SubscriptionsDbHelper.COLUMN_FOLLOWERS, streamer.getFollowers());
         values.put(SubscriptionsDbHelper.COLUMN_UNIQUE_VIEWS, streamer.getViews());
         values.put(SubscriptionsDbHelper.COLUMN_NOTIFY_WHEN_LIVE, disableForStreamer ? 0 : 1); // Enable by default
+        values.put(SubscriptionsDbHelper.COLUMN_IS_TWITCH_FOLLOW, 0);
 
 
         // Test if the URL strings are null, to make sure we don't call toString on a null.
@@ -740,12 +752,14 @@ public class Service {
         if (streamer.getProfileBannerURL() != null)
             values.put(SubscriptionsDbHelper.COLUMN_PROFILE_BANNER_URL, streamer.getProfileBannerURL().toString());
 
-        SubscriptionsDbHelper helper = new SubscriptionsDbHelper(context);
-        SQLiteDatabase db = helper.getWritableDatabase();
-        db.insert(SubscriptionsDbHelper.TABLE_NAME, null, values);
-        db.close();
 
-
+        streamer.getFollowers(context, followers -> {
+            values.put(SubscriptionsDbHelper.COLUMN_FOLLOWERS, followers.or(0));
+            SubscriptionsDbHelper helper = new SubscriptionsDbHelper(context);
+            SQLiteDatabase db = helper.getWritableDatabase();
+            db.insert(SubscriptionsDbHelper.TABLE_NAME, null, values);
+            db.close();
+        });
     }
 
     public static void clearStreamerInfoDb(Context context) {

@@ -79,8 +79,26 @@ public class Settings {
     private final String SHOW_CHANGELOGS = "showChangelogs";
     private final Context context;
 
+    private static boolean migrated = false;
+
     public Settings(Context context) {
         this.context = context;
+
+        if (migrated) return;
+        migrated = true;
+
+        SharedPreferences preferences = getPreferences();
+        SharedPreferences.Editor editor = preferences.edit();
+        for (String key : preferences.getAll().keySet()) {
+            if (key.startsWith(this.STREAM_VOD_PROGRESS + "v")) {
+                editor.putInt(this.STREAM_VOD_PROGRESS + key.substring(this.STREAM_VOD_PROGRESS.length() + 1), preferences.getInt(key, 0));
+                editor.remove(key);
+            } else if (key.startsWith(this.STREAM_VOD_LENGTH)) {
+                editor.remove(key);
+            }
+        }
+
+        editor.apply();
     }
 
     private SharedPreferences.Editor getEditor() {
@@ -235,7 +253,7 @@ public class Settings {
 
     public String getAppearanceGameStyle() {
         SharedPreferences preferences = getPreferences();
-        return preferences.getString(this.APPEARANCE_GAME_STYLE, context.getString(R.string.card_style_normal));
+        return preferences.getString(this.APPEARANCE_GAME_STYLE, context.getString(R.string.card_style_expanded));
     }
 
     /**
@@ -432,6 +450,7 @@ public class Settings {
      * Stream VOD - Used to remember the progress of a vod
      */
 
+    // TODO: This should probably be stored in a database.
     public void setVodProgress(String VODid, int progress) {
         Log.d(getClass().getSimpleName(), "Saving Current Progress: " + progress);
         SharedPreferences.Editor editor = getEditor();
@@ -447,18 +466,6 @@ public class Settings {
     /**
      * Stream VOD - Used to remember the length of a vod
      */
-
-    public void setVodLength(String VODid, int length) {
-        Log.d(getClass().getSimpleName(), "Saving Current Progress: " + length);
-        SharedPreferences.Editor editor = getEditor();
-        editor.putInt(this.STREAM_VOD_LENGTH + VODid, length);
-        editor.commit();
-    }
-
-    public int getVodLength(String VODid) {
-        SharedPreferences preferences = getPreferences();
-        return preferences.getInt(this.STREAM_VOD_LENGTH + VODid, 0);
-    }
 
     public int getStreamSleepTimerHour() {
         SharedPreferences preferences = getPreferences();
@@ -811,9 +818,6 @@ public class Settings {
      */
 
     public void setLogin(boolean isLoggedIn) {
-        if (!isLoggedIn) {
-            Service.clearStreamerInfoDb(context);
-        }
         SharedPreferences.Editor editor = getEditor();
         editor.putBoolean(this.SETUP_IS_LOGGED_IN, isLoggedIn);
         editor.commit();
@@ -873,6 +877,7 @@ public class Settings {
     public void setChatEmoteSEVENTV(boolean setting) {
         SharedPreferences.Editor editor = getEditor();
         editor.putBoolean(this.CHAT_EMOTE_SEVENTV, setting);
+        editor.commit();
     }
 
      /**

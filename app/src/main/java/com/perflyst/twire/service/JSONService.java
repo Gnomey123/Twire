@@ -1,14 +1,12 @@
 package com.perflyst.twire.service;
 
 import android.content.Context;
-import android.util.Log;
-
-import androidx.annotation.Nullable;
 
 import com.perflyst.twire.R;
 import com.perflyst.twire.model.ChannelInfo;
 import com.perflyst.twire.model.Game;
 import com.perflyst.twire.model.StreamInfo;
+import com.perflyst.twire.model.UserInfo;
 import com.perflyst.twire.model.VideoOnDemand;
 
 import org.json.JSONException;
@@ -18,6 +16,8 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Created by Sebastian Rask on 25-04-2016.
@@ -25,66 +25,106 @@ import java.util.GregorianCalendar;
 public class JSONService {
     private static final String LOG_TAG = JSONService.class.getSimpleName();
 
-    public static VideoOnDemand getVod(JSONObject vodObject) throws JSONException {
-        final String TITLE_STRING = "title";
-        final String VIDEO_ID_STRING = "_id";
-        final String GAME_TITLE_STRING = "game";
-        final String VIDEO_LENGTH_INT = "length";
-        final String VIDEO_VIEWS_INT = "views";
-        final String RECORDED_DATE_STRING = "recorded_at";
-        final String PREVIEW_URL_OBJECT = "preview";
-        final String PREVIEW_URL_SMALL_STRING = "small";
-        final String PREVIEW_URL_MEDIUM_STRING = "medium";
-        final String PREVIEW_URL_LARGE_STRING = "large";
-        final String CHANNEL_OBJECT = "channel";
-        final String CHANNEL_NAME_STRING = "name";
-        final String CHANNEL_DISPLAY_NAME_STRING = "display_name";
+    // based on https://github.com/twurple/twurple/blob/6d3ca508fe0a21fadd77b63b62d0df66b9150f97/packages/api/src/api/helix/video/HelixVideo.ts#L175
+    public static int getVodLenght(String length) {
+        int all = 0;
+        String[] letters = {
+          "h",
+          "m",
+          "s"
+        };
+        int[] times = {
+                3600,
+                60,
+                1
+        };
+        String[] regex = {
+                "[0-9]{1,}[h]",
+                "[0-9]{1,}[m]",
+                "[0-9]{1,}[s]"
+        };
 
-        JSONObject channel = vodObject.getJSONObject(CHANNEL_OBJECT);
-        String gameTitle = "";
-        if (!vodObject.isNull(GAME_TITLE_STRING)) {
-            gameTitle = vodObject.getString(GAME_TITLE_STRING);
+        for (int i=0; i < regex.length; i++) {
+            Pattern pattern = Pattern.compile(regex[i]);
+            Matcher matcher = pattern.matcher(length);
+            if (matcher.find()) {
+                String match = matcher.group().replace(letters[i], "");
+                int temp = Integer.parseInt(match);
+                all = all + (temp * times[i]);
+            }
         }
-
-        return new VideoOnDemand(vodObject.getString(TITLE_STRING), gameTitle, vodObject.getJSONObject(PREVIEW_URL_OBJECT).getString(PREVIEW_URL_MEDIUM_STRING), vodObject.getString(VIDEO_ID_STRING), channel.getString(CHANNEL_NAME_STRING), channel.getString(CHANNEL_DISPLAY_NAME_STRING), vodObject.getInt(VIDEO_VIEWS_INT), vodObject.getInt(VIDEO_LENGTH_INT), vodObject.has(RECORDED_DATE_STRING) ? vodObject.getString(RECORDED_DATE_STRING) : "");
+        return all;
     }
 
-    public static StreamInfo getStreamInfo(Context context, JSONObject streamObject, @Nullable ChannelInfo aChannelInfo, boolean loadDescription) throws JSONException, MalformedURLException {
+    public static VideoOnDemand getVod(JSONObject vodObject) throws JSONException {
+        final String TITLE_STRING = "title";
+        final String VIDEO_ID_STRING = "id";
+        final String VIDEO_LENGTH_INT = "duration";
+        final String VIDEO_VIEWS_INT = "view_count";
+        final String RECORDED_DATE_STRING = "created_at";
+        final String PREVIEW_URL_IMAGE = "thumbnail_url";
+        final String CHANNEL_NAME_STRING = "user_login";
+        final String CHANNEL_DISPLAY_NAME_STRING = "user_name";
+
+        String gameTitle = "";
+
+        return new VideoOnDemand(vodObject.getString(TITLE_STRING), gameTitle, vodObject.getString(PREVIEW_URL_IMAGE).replace("%{width}", "320").replace("%{height}", "180"), vodObject.getString(VIDEO_ID_STRING), vodObject.getString(CHANNEL_NAME_STRING), vodObject.getString(CHANNEL_DISPLAY_NAME_STRING), vodObject.getInt(VIDEO_VIEWS_INT), getVodLenght(vodObject.getString(VIDEO_LENGTH_INT)), vodObject.has(RECORDED_DATE_STRING) ? vodObject.getString(RECORDED_DATE_STRING) : "");
+    }
+
+    public static UserInfo getUserInfo(JSONObject userObject) throws JSONException {
+        // Twitch doesn't keep their field names consistent, so we need to make them consistent.
+        if (userObject.has("broadcaster_login")) { // Search uses id, broadcaster_login, display_name
+            return new UserInfo(
+                    userObject.getInt("id"),
+                    userObject.getString("broadcaster_login"),
+                    userObject.getString("display_name")
+            );
+        } else if (userObject.has("login")) { // Users uses id, login, display_name
+            return new UserInfo(
+                    userObject.getInt("id"),
+                    userObject.getString("login"),
+                    userObject.getString("display_name")
+            );
+        } else if (userObject.has("user_id")) { // Streams uses user_id, user_login, user_name
+            return new UserInfo(
+                    userObject.getInt("user_id"),
+                    userObject.getString("user_login"),
+                    userObject.getString("user_name")
+            );
+        }
+
+        throw new JSONException("Could not parse user JSON.");
+    }
+
+    public static StreamInfo getStreamInfo(Context context, JSONObject streamObject, boolean loadDescription) throws JSONException, MalformedURLException {
         Settings settings = new Settings(context);
-        final String PREVIEW_LINK_OBJECT = "preview";
-        final String CHANNEL_OBJECT = "channel";
-        final String CHANNEL_STATUS_STRING = "status";
-        final String GAME_STRING = "game";
-        final String STREAM_START_TIME_STRING = "created_at";
-        final String CURRENT_VIEWERS_INT = "viewers";
+        final String PREVIEW_LINK_OBJECT = "thumbnail_url";
+        final String CHANNEL_STATUS_STRING = "title";
+        final String GAME_STRING = "game_name";
+        final String STREAM_START_TIME_STRING = "started_at";
+        final String CURRENT_VIEWERS_INT = "viewer_count";
         String prepend_image = "";
 
-        final String PREVIEW_SMALL_STRING = "small";
-        final String PREVIEW_MEDIUM_STRING = "medium";
-        final String PREVIEW_LARGE_STRING = "large";
-
-        JSONObject JSONPreview = streamObject.getJSONObject(PREVIEW_LINK_OBJECT);
-        JSONObject JSONChannel = streamObject.getJSONObject(CHANNEL_OBJECT);
-        ChannelInfo mChannelInfo = aChannelInfo == null ? getStreamerInfo(JSONChannel, loadDescription) : aChannelInfo;
+        UserInfo userInfo = getUserInfo(streamObject);
 
         String gameName = streamObject.getString(GAME_STRING);
-        String title = context.getString(R.string.default_stream_title, mChannelInfo.getDisplayName(), gameName);
+
+        String title = context.getString(R.string.default_stream_title, userInfo.getDisplayName(),  gameName);
         int currentViewers = streamObject.getInt(CURRENT_VIEWERS_INT);
 
-        if (!JSONChannel.isNull(CHANNEL_STATUS_STRING)) {
-            title = JSONChannel.getString(CHANNEL_STATUS_STRING);
-        } else {
-            Log.i(LOG_TAG, "Status/title for " + mChannelInfo.getDisplayName() + " is null");
+        if (streamObject.has(CHANNEL_STATUS_STRING)) {
+            title = streamObject.getString(CHANNEL_STATUS_STRING);
         }
 
         if (settings.getGeneralUseImageProxy()) {
             prepend_image = settings.getImageProxyUrl();
         }
 
+        // Helix has no previews Object but we can built that by hand
         String[] previews = {
-                prepend_image + JSONPreview.getString(PREVIEW_SMALL_STRING),
-                prepend_image + JSONPreview.getString(PREVIEW_MEDIUM_STRING),
-                prepend_image + JSONPreview.getString(PREVIEW_LARGE_STRING),
+                prepend_image + streamObject.getString(PREVIEW_LINK_OBJECT).replace("{width}", "80").replace("{height}", "45"),
+                prepend_image + streamObject.getString(PREVIEW_LINK_OBJECT).replace("{width}", "320").replace("{height}", "180"),
+                prepend_image + streamObject.getString(PREVIEW_LINK_OBJECT).replace("{width}", "640").replace("{height}", "360"),
         };
 
         String startedAtString = streamObject.getString(STREAM_START_TIME_STRING);
@@ -98,27 +138,22 @@ public class JSONService {
         long startAtLong = startedAt.getTimeInMillis();
 
 
-        return new StreamInfo(mChannelInfo, gameName, currentViewers, previews, startAtLong, title);
+        return new StreamInfo(userInfo, gameName, currentViewers, previews, startAtLong, title);
     }
 
-    public static ChannelInfo getStreamerInfo(JSONObject channel, boolean loadDescriptionOnSameThread) throws JSONException, MalformedURLException {
-        final String DISPLAY_NAME_STRING = "display_name";
-        final String TWITCH_NAME_STRING = "name";
+    public static ChannelInfo getStreamerInfo(Context context, JSONObject channel) throws JSONException, MalformedURLException {
         final String FOLLOWERS_INT = "followers";
-        final String VIEWS_INT = "views";
-        final String LOGO_URL_STRING = "logo";
+        final String VIEWS_INT = "view_count";
+        final String LOGO_URL_STRING = "profile_image_url";
         final String BANNER_URL_STRING = "banner";
-        final String VIDEO_BANNER_URL_STRING = "video_banner";
+        final String VIDEO_BANNER_URL_STRING = "offline_image_url";
         final String BACKGROUND_STRING = "background";
         final String PROFILE_BANNER_URL_STRING = "profile_banner";
         final String PROFILE_BANNER_BACKGROUND_COLOR_STRING = "profile_banner_background_color";
-        final String BIO_STRING = "bio";
-        final String USER_ID_INT = "_id";
+        final String BIO_STRING = "description";
 
-        String displayName = channel.getString(DISPLAY_NAME_STRING);
-        int userId = channel.getInt(USER_ID_INT);
-        final String twitchName = channel.getString(TWITCH_NAME_STRING);
-        int follows = channel.getInt(FOLLOWERS_INT);
+        UserInfo userInfo = getUserInfo(channel);
+
         int views = channel.getInt(VIEWS_INT);
         URL logoURL = null,
                 videoBannerURL = null,
@@ -128,7 +163,7 @@ public class JSONService {
             logoURL = new URL(channel.getString(LOGO_URL_STRING));
         }
 
-        if (!channel.isNull(VIDEO_BANNER_URL_STRING)) {
+        if (!channel.getString(VIDEO_BANNER_URL_STRING).equals("")) {
             videoBannerURL = new URL(channel.getString(VIDEO_BANNER_URL_STRING));
         }
 
@@ -136,43 +171,25 @@ public class JSONService {
             profileBannerURL = new URL(channel.getString(PROFILE_BANNER_URL_STRING));
         }
 
-        final ChannelInfo channelInfo = new ChannelInfo(userId, twitchName, displayName, "", follows, views, logoURL, videoBannerURL, profileBannerURL);
+        final ChannelInfo channelInfo = new ChannelInfo(userInfo, "", -1, views, logoURL, videoBannerURL, profileBannerURL);
 
-        // Load the user's description.
-        final String descriptionURL = "https://api.twitch.tv/kraken/users/" + userId;
-        if (!loadDescriptionOnSameThread) {
-            new Thread(() -> {
-                try {
-                    JSONObject JSONStringTwo = new JSONObject(Service.urlToJSONString(descriptionURL));
-                    String asyncDescription = JSONStringTwo.isNull(BIO_STRING) ? "" : JSONStringTwo.getString(BIO_STRING);
-                    channelInfo.setStreamDescription(asyncDescription);
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            }).start();
-        } else {
-            JSONObject JSONStringTwo = new JSONObject(Service.urlToJSONString(descriptionURL));
-            String description = JSONStringTwo.isNull(BIO_STRING) ? "" : JSONStringTwo.getString(BIO_STRING);
-            channelInfo.setStreamDescription(description);
-        }
+        channelInfo.setStreamDescription(channel.getString(BIO_STRING));
 
         return channelInfo;
     }
 
     public static Game getGame(JSONObject game) throws JSONException {
         final String TITLE_STRING_KEY = "name";
-        final String PREVIEW_OBJECT_KEY = "box";
-        final String LARGE_STRING_KEY = "large";
-        final String MEDIUM_STRING_KEY = "medium";
-        final String SMALL_STRING_KEY = "small";
-
-        JSONObject previewsObject = game.getJSONObject(PREVIEW_OBJECT_KEY);
+        final String PREVIEW_OBJECT_KEY = "box_art_url";
+        final String GAME_ID_KEY = "id";
 
         String gameTitle = game.getString(TITLE_STRING_KEY);
-        String smallPreview = previewsObject.getString(SMALL_STRING_KEY);
-        String mediumPreview = previewsObject.getString(MEDIUM_STRING_KEY);
-        String largePreview = previewsObject.getString(LARGE_STRING_KEY);
+        String smallPreview = game.getString(PREVIEW_OBJECT_KEY).replace("{width}", "52").replace("{height}", "72");
+        String mediumPreview = game.getString(PREVIEW_OBJECT_KEY).replace("{width}", "136").replace("{height}", "190");
+        String largePreview = game.getString(PREVIEW_OBJECT_KEY).replace("{width}", "272").replace("{height}", "380");
 
-        return new Game(gameTitle, smallPreview, mediumPreview, largePreview);
+        int game_ID = game.getInt(GAME_ID_KEY);
+
+        return new Game(gameTitle, game_ID, smallPreview, mediumPreview, largePreview);
     }
 }

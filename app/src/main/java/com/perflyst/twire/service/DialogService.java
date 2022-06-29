@@ -12,7 +12,7 @@ import com.afollestad.materialdialogs.MaterialDialog;
 import com.afollestad.materialdialogs.simplelist.MaterialSimpleListAdapter;
 import com.afollestad.materialdialogs.simplelist.MaterialSimpleListItem;
 import com.github.stephenvinouze.materialnumberpickercore.MaterialNumberPicker;
-import com.google.android.exoplayer2.SimpleExoPlayer;
+import com.google.android.exoplayer2.ExoPlayer;
 import com.perflyst.twire.R;
 import com.perflyst.twire.views.LayoutSelector;
 import com.rey.material.widget.CheckedTextView;
@@ -62,6 +62,27 @@ public class DialogService {
                 .content(activity.getString(R.string.gen_dialog_login_or_out_content, username))
                 .positiveText(R.string.gen_dialog_login_or_out_login_action)
                 .negativeText(R.string.gen_dialog_login_or_out_logout_action).build();
+    }
+
+    public static MaterialDialog getSettingsWipeFollowsDialog(Activity activity) {
+        return getBaseThemedDialog(activity)
+                .content(activity.getString(R.string.gen_dialog_wipe_follows_content))
+                .positiveText(R.string.gen_dialog_wipe_follows_action)
+                .negativeText(R.string.cancel).build();
+    }
+
+    public static MaterialDialog getSettingsExportFollowsDialog(Activity activity) {
+        return getBaseThemedDialog(activity)
+                .content(activity.getString(R.string.gen_dialog_export_follows_content))
+                .positiveText(R.string.gen_dialog_export_follows_action)
+                .negativeText(R.string.cancel).build();
+    }
+
+    public static MaterialDialog getSettingsImportFollowsDialog(Activity activity) {
+        return getBaseThemedDialog(activity)
+                .content(activity.getString(R.string.gen_dialog_import_follows_content))
+                .positiveText(R.string.gen_dialog_import_follows_action)
+                .negativeText(R.string.cancel).build();
     }
 
     public static MaterialDialog getChooseStartUpPageDialog(Activity activity, String currentlySelectedPageTitle, MaterialDialog.ListCallbackSingleChoice listCallbackSingleChoice) {
@@ -240,7 +261,7 @@ public class DialogService {
         return dialog;
     }
 
-    public static MaterialDialog getPlaybackDialog(Activity activity, SimpleExoPlayer player) {
+    public static MaterialDialog getPlaybackDialog(Activity activity, ExoPlayer player) {
         MaterialDialog dialog = getBaseThemedDialog(activity)
                 .title(R.string.menu_playback)
                 .customView(R.layout.dialog_playback, false)
